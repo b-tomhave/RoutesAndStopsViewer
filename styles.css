@@ -47,3 +47,13 @@ h1, h2, h3, h4 { font-weight: 400; }
 .leaflet-container {
   background-color: white !important;
 }
+
+/* Remove select-all option from route picker */
+.bs-select-all {
+  display: none;
+}
+
+/* Increase width of deselect-all option from route picker */
+.bs-deselect-all {
+  width: 100%;
+}
