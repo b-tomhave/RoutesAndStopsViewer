@@ -1,4 +1,4 @@
-# R Shiny App For Health Tracking (Blood pressure and Heartbeat)
+# R Shiny App GTFS Data Viewing
 ##############################################################################
 # Libraries
 library(shiny)
@@ -17,6 +17,7 @@ library(sf)
 #library(leaflet.extras)
 library(gtools) # For mixed sort
 library(DT)
+library(stringr) # For string formatting
 
 #setwd("~/Documents/R Projects/RoutesAndStopsViewer")
 
@@ -70,9 +71,12 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
                                selectInput(
                                  "gtfsFileSelect",
                                  label = h4("Select a GTFS File to View Details"),
-                                 choices = c("routes.txt" = "routes",
-                                             "stops.txt"  = "stops",
-                                             "agency.txt" = "agency"),
+                                 choices = c("routes.txt"     = "routes",
+                                             "stops.txt"      = "stops",
+                                             "trips.txt"      = "trips",
+                                             "stop_times.txt" = "stop_times",
+                                             "calendar.txt"   = "calendar",
+                                             "agency.txt"     = "agency"),
                                  selected = NULL,
                                  multiple = FALSE,
                                  selectize = TRUE
@@ -80,21 +84,44 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
                     ),
                     hr(),br(), #Insert blank space and horizontal line
                     h3(textOutput("selectedFile")),
-                    "'formattedRouteName' from the routes.txt table shown below is the route selection field on the interactive map tab.",
+                    "'formattedRouteName' in the routes.txt table is the route selection field on the interactive map tab.",
                     br(),
                     DT::dataTableOutput("routesTable")
                     ),
            
            # Frequency Analysis Preview
-           tabPanel("Frequency Analysis",
+           tabPanel("Single Route Frequency Analysis",
                     h2("Overview of Route Level Frequency/Headway"),
                     h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Interactive Map' tab to load data below."),
-                    tags$style(HTML("#gtfsFileLoadWarning{color: red;}")), # Set warning text to be red
                     fluidRow(
-                        column(5,
+                      column(5,
+                      uiOutput("frequencyAnalysisRoute"),
+                      "Frequencies obtained by calculating time between same route & direction service at stop_sequence = 1",
+                      br(),
+                      br()
+                      )
+                    ),
+                    # fluidRow(br()),
+                    fluidRow(
+                        column(3,
                              DT::dataTableOutput("frequencyTable")  
-                        )
+                        ),
+                        column(2),
+                        column(7, align = "center",
+                               plotlyOutput("freqScatterPlot"),
+                               br(),
+                               br(),
+                               br(),
+                               br(),
+                               tableOutput('renderedTodRefTable'))
                     )
+           ),
+           tabPanel("Multiple Route Frequency Plot",
+                    h2("Overview of Route Level Frequency/Headway Across Multiple Routes"),
+                    h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Interactive Map' tab to load data below."),
+                    
+                    fluidRow(uiOutput("multiRouteSelectionFreq"),
+                             plotlyOutput("multiRouteFreqPlot"))
            )
 )
 
@@ -178,7 +205,7 @@ server <- function(input, output, session, ...) {
         afterDashTable <- table(afterDash)
 
         # Create named list converting errored dashed route_id (if present) to non-dashed route-id if same value after dash occers 50+ times
-        if (nrow(able(afterDash)) != 0){
+        if (nrow(table(afterDash)) != 0){
           potentialIssueCorrectedIds <- as.character(ifelse(na.omit(as.numeric(afterDashTable[afterDash]), 0) >= 50,
                                                       as.character(sapply(strsplit(as.character(x$routes$route_id[potentialIssueRows]),"-"),'[',1)),
                                                       as.character(x$routes$route_id[potentialIssueRows])))
@@ -186,8 +213,8 @@ server <- function(input, output, session, ...) {
           old2NonDashedRouteId <- c(potentialIssueCorrectedIds,
                                     as.character(x$routes$route_id[!potentialIssueRows]))
           
-          names(old2NonDashedRouteId) <- c(as.character(testData$routes$route_id[potentialIssueRows]),
-                                           as.character(testData$routes$route_id[!potentialIssueRows]))
+          names(old2NonDashedRouteId) <- c(as.character(x$routes$route_id[potentialIssueRows]),
+                                           as.character(x$routes$route_id[!potentialIssueRows]))
         }else{
           old2NonDashedRouteId <- as.character(x$routes$route_id)
           names(old2NonDashedRouteId) <- as.character(x$routes$route_id)
@@ -226,13 +253,23 @@ server <- function(input, output, session, ...) {
         return (geoms)
     })
     
+    # Get frequency data for all routes
+    allFreqData <- reactive({
+      completeFreqTable <- na.omit(gtfsFunctions::calculateFrequenciesByRoute(gtfs_file()))
+      incProgress(0.7, message = "Frequencies Calculated") # Progress bar message
+      return(completeFreqTable)
+    })
+    
+    
     # Get stops data and create routesAtStop field
     stops<- reactive({
         #stopTable <- gtfsFunctions::routeIDAtStops(gtfs_file())
         stopTableSimple <- gtfsFunctions::simpleRoutesAtStops(gtfs_file())
-        incProgress(0.7, message = "Stops Loaded") # Progress bar message
+        incProgress(0.9, message = "Stops Loaded") # Progress bar message
         return (stopTableSimple)
     })
+    
+    
     
     # Reformat above reactive stops object to have a single record for each stop-route pair
     stopRouteTable_Long<- reactive({
@@ -251,7 +288,7 @@ server <- function(input, output, session, ...) {
 ##############################################################################
 # Set that no routes were previously picked with this gtfs file (used when exlcuding layers in map)
 previousRoutes <- c("") # Set basic empty list
-    
+
 observeEvent(input$selectFile, {
   withProgress(message = 'Loading...', value = 0, {
 
@@ -259,13 +296,39 @@ observeEvent(input$selectFile, {
     routeChoicesFormatted <- as.character(gtfs_file()$routes$route_id)
     names(routeChoicesFormatted) <- as.character(gtfs_file()$routes$formattedRouteName)#
 
+    # Get RouteFormatted Names that Have a letter as the first element (these will be placed before numbered routes)
+    letterFirstIndices <- grep("^[A-Za-z]", names(routeChoicesFormatted)) # Carrot indicates only looking at first/start character
+    # If there is at least one route with a letter first then split order to put those first
+    if (length(letterFirstIndices) != 0){
+      # Routes that start with a letter
+      routesWithLetterStart <- routeChoicesFormatted[letterFirstIndices]
+      
+      # Of the routes that start with a letter, which only have one character
+      singleLetterIndices <- nchar(names(routesWithLetterStart)) == 1
+      singleLetterNames <- names(routesWithLetterStart[singleLetterIndices]) 
+
+      # Which routes do not have a letter as first character
+      nonLetterFirstNames <- names(routeChoicesFormatted[stringr::str_sort(names(routeChoicesFormatted[-letterFirstIndices]), numeric = TRUE)])
+      
+      # Combine routes. First the single letter routes, then the routes that have a letter as first value but have length >1, then non-letter first routes
+      newOrder <- routeChoicesFormatted[c(mixedsort(singleLetterNames), # Single letter routes
+                                          mixedsort(names(routesWithLetterStart[singleLetterIndices == FALSE])), #  Routes with letter first but longer than one 1 character
+                                          nonLetterFirstNames) # Routes with non-letter as first character
+                                        ]
+      #print(newOrder)
+    }else{
+      newOrder = mixedsort(routeChoicesFormatted)
+    }
+    
+    # Get the Frequency Data
+    allFreqData()
     
     # Dropdown menu to select routes to view
       output$routeOptions <- renderUI({  
       pickerInput(
           inputId = "routeOptionsInput",
           label = "Select routes to view",
-          choices = mixedsort(routeChoicesFormatted), #unique(as.character(gtfs_file()$routes$formattedRouteName)),#mixedsort(unique(as.character(gtfs_file()$routes$route_id))), 
+          choices = newOrder, #mixedsort(routeChoicesFormatted), #unique(as.character(gtfs_file()$routes$formattedRouteName)),#mixedsort(unique(as.character(gtfs_file()$routes$route_id))), 
           options = list(
               `actions-box` = TRUE,
               size = 10,
@@ -273,6 +336,30 @@ observeEvent(input$selectFile, {
               `count-selected-text` = "{0} routes selected"
           ),
           multiple = TRUE)
+      })
+      
+      # Dropdown menu to select route for frequency analysis
+      output$frequencyAnalysisRoute <- renderUI({
+        selectInput(
+          "frequencyRouteSelection",
+          label = h4("Select a Route"),
+          choices = newOrder,
+          selected = NULL,
+          multiple = FALSE,
+          selectize = TRUE
+        )
+      })
+      
+      # Dropdown menu to select route for multi-route frequency analysis
+      output$multiRouteSelectionFreq <- renderUI({
+        selectInput(
+          "multiRouteSelectionFreqInput",
+          label = h4("Select a Route"),
+          choices = newOrder,
+          selected = NULL,
+          multiple = TRUE,
+          selectize = TRUE
+        )
       })
       
       #Dropdown menu to select stop to zoom to
@@ -448,7 +535,7 @@ observeEvent(input$gtfsFileSelect, {
   })
   
   output$routesTable <- DT::renderDataTable(DT::datatable(gtfs_file()[[as.character(input$gtfsFileSelect)]], filter = 'top',
-                                                          options = list(pageLength = 25, ordering=F),
+                                                          options = list(pageLength = 100, ordering=F),
                                                           rownames= FALSE,
                                                           escape = FALSE,
                                                           selection = 'none')) # Set Strings as Factor so that filter is a dropdown not typing
@@ -460,11 +547,85 @@ observeEvent(input$gtfsFileSelect, {
 # Frequency Analysis Overview Tab
 ##############################################################################
 # Takes 13 seconds
-output$frequencyTable <- DT::renderDataTable(DT::datatable(na.omit(gtfsFunctions::calculateFrequenciesByRoute(gtfs_file())),
-                                                           filter = 'top',
+observeEvent(input$frequencyRouteSelection, {
+  # as.data.table(allFreqData())[as.character(route_id) == as.character(input$frequencyRouteSelection),
+  #                              (period) := factor(get(period),
+  #                                                 levels = c("Early","AM Peak","Midday", "PM Peak","Evening", "Night", "Owl"))]
+  
+
+  
+  freqData <- data.table(allFreqData())[as.character(route_id) == as.character(input$frequencyRouteSelection)]
+
+  setorder(freqData, direction_id, period)
+  output$frequencyTable <- DT::renderDataTable(DT::datatable(freqData,
+                                                           options = list(pageLength = 15),
                                                            rownames= FALSE
                                                            ))
+  
+  output$freqScatterPlot <- renderPlotly({plot_ly(freqData, x = ~period, y = ~avgHeadway_Mins,
+                                    type = 'scatter', mode = 'lines+markers', linetype = ~direction_id) %>%
+                                    layout(title = sprintf('Route %s Avg. Headway By Time of Day & Route Direction', input$frequencyRouteSelection),
+                                           xaxis = list(title = 'Time of Day'),
+                                           yaxis = list (title = 'Avg. Headway (Minutes)'))%>%
+                                    config(modeBarButtonsToRemove = c("zoom2d", "pan2d", "select2d", "lasso2d", "zoomIn2d",
+                                                                      "zoomOut2d", "autoScale2d", "resetScale2d", "resetScale2d",
+                                                                      "toggleSpikelines", "hoverClosestCartesian", "hoverCompareCartesian"))
+    })
+  
+})
 
+
+todRefTable <- data.table::data.table(BeginTime = gtfsFunctions::transitTime2HHMMSS(c(0,14400,21600,32400,54000,66600,75600,86400)),
+                                       EndTime = gtfsFunctions::transitTime2HHMMSS(c(14400,21600,32400,54000,66600,75600,86400,100800)),
+                                       Period = factor(c("Owl","Early","AM Peak","Midday",
+                                                         "PM Peak","Evening", "Night","Owl"),
+                                                       levels = c("Early","AM Peak","Midday", "PM Peak",
+                                                                  "Evening", "Night", "Owl"),
+                                                       ordered = T))
+
+todRefTable$timeFrame <- paste(todRefTable$BeginTime, "-", todRefTable$EndTime) # Create Single column for start and end time
+
+# Transpose TOD and set column 1 (OWL) to show up last rather than first
+transposedTOD <- t(todRefTable[, .(Period, timeFrame)])[, 1:(ncol(t(todRefTable[, .(Period, timeFrame)])) - 1 )][,c(2,3,4,5,6,7,1)]
+
+# Output TOD ref table removing Owl value from 24:00:00-28:00:00 for legibility because we have 00:00:00-04:00:00 also
+output$renderedTodRefTable <- renderTable({transposedTOD},
+                                          striped = TRUE, align = 'c', rownames = TRUE, colnames = FALSE)  
+
+
+
+
+##############################################################################
+# Multi-Route Frequency Analysis Plot
+##############################################################################
+observeEvent(input$multiRouteSelectionFreqInput, {
+freqData <- data.table(allFreqData())[as.character(route_id) == as.character(input$multiRouteSelectionFreqInput) & avgHeadway_Mins < 9000 & direction_id == 0 & period == "AM Peak"]
+print(freqData)
+#midday2 <- midday[midday$avgHeadway_Mins < 9000 & midday$direction_id == 0 & midday$period == "AM Peak", ]
+#freqData$route_id <- factor(freqData$route_id , levels = unique(freqData$route_id)[order(as.numeric(freqData$avgHeadway_Mins))])
+#multiRouteSelectionFreq
+# # Color code by route type?
+# fig2 <- plot_ly(freqData,
+#                 x = ~route_id,
+#                 y = ~avgHeadway_Mins,
+#                 type = "bar"
+# )
+# 
+# 
+# 
+output$multiRouteFreqPlot <- renderPlotly({plot_ly(freqData,
+                                                      x = ~route_id,
+                                                      y = ~avgHeadway_Mins,
+                                                      type = "bar"
+                                                      ) %>%
+    layout(title = sprintf('Route %s Avg. Headway By Time of Day & Route Direction', input$frequencyRouteSelection),
+           xaxis = list(title = 'Time of Day'),
+           yaxis = list (title = 'Avg. Headway (Minutes)'))%>%
+    config(modeBarButtonsToRemove = c("zoom2d", "pan2d", "select2d", "lasso2d", "zoomIn2d",
+                                      "zoomOut2d", "autoScale2d", "resetScale2d", "resetScale2d",
+                                      "toggleSpikelines", "hoverClosestCartesian", "hoverCompareCartesian"))
+})
+})
 } # End of Server
 
 ##############################################################################
@@ -490,12 +651,12 @@ shinyApp(ui, server)
 # data <- gtfsFunctions::formatGTFSObject("/Users/bentomhave/Documents/Data_GTFS/MetroTransit_MSP.zip")
 
 # # # # Get Headways by Trip
-# #freqsByTrip <- gtfsFunctions::calculateFrequenciesByTrip(data) # Takes 15 seconds
+# #freqsByTrip <- gtfsFunctions::calculateFrequenciesByTripAndService(data) # Takes 15 seconds
 # # # 
 # # # # Get Headways by Route and Time Period
 # # freqs <- gtfsFunctions::calculateFrequenciesByRoute(data) # Takes 13 seconds
 # # 
-# # tripHeadways <- gtfsFunctions::calculateFrequenciesByTrip(data)
+# # tripHeadways <- gtfsFunctions::calculateFrequenciesByTripAndService(data)
 # # tripHeadways$headway_mins <- tripHeadways$headway_secs/60
 # # 
 # # # Join trips.txt to this to get route_ids (only use route_ids to limit size)
@@ -519,3 +680,15 @@ shinyApp(ui, server)
 # # [ , .(mean_speed = mean(speed)), by = dive]
 # # tripHeadways2 <- tripHeadways2[, route_id := gtools::mixedsort(route_id)]
 # # 
+# library(stringr)
+# routeOptions1 <- c("CR-Haverhill","10","15","100","2","20","25","200", "A Line")
+# names(routeOptions1) <- c('test1','test2','test3','test4','test5','test6','test7','test8','test9')
+# 
+# letterFirstIndices <- grep("[A-Za-z]", routeOptions1)
+# c(as.character(routeOptions1[letterFirstIndices]), stringr::str_sort(routeOptions1[-letterFirstIndices], numeric = TRUE))
+# 
+# routeChoicesFormatted <- as.character(gtfs_file()$routes$route_id)
+# names(routeChoicesFormatted) <- as.character(gtfs_file()$routes$formattedRouteName)#
+# testing <- c('test3','test4','test5','test6','test7','test8','test9','test1','test2')
+# routeOptions[c("test9","test5")]
+
