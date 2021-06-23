@@ -10,7 +10,7 @@ library(plotly)
 library(tidytransit) # For read_gtfs
 library(shinyWidgets) # For pickerInput
 library(data.table)
-library(gtfsFunctions) #devtools::install_github("b-tomhave/gtfsFunctions")
+library(gtfsFunctions) #devtools::install_github("b-tomhave/gtfsFunctions", force = TRUE)
 library(tidytransit)
 library(leaflet)
 library(sf)

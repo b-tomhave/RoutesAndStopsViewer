@@ -1,0 +1,13 @@
+name: RoutesAndStopsViewer
+title: RoutesAndStopsViewer
+username:
+account: benjamint17
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 4247941
+bundleId: 4696355
+url: https://benjamint17.shinyapps.io/RoutesAndStopsViewer/
+when: 1623240079.24026
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: Testing.R
