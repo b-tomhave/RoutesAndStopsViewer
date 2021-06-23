@@ -11,7 +11,7 @@ library(tidytransit) # For read_gtfs
 library(shinyWidgets) # For pickerInput
 library(data.table)
 library(gtfsFunctions) #devtools::install_github("b-tomhave/gtfsFunctions", force = TRUE)
-library(tidytransit)
+library(gtfsio)
 library(leaflet)
 library(sf)
 #library(leaflet.extras)
@@ -21,9 +21,10 @@ library(stringr) # For string formatting
 
 #setwd("~/Documents/R Projects/RoutesAndStopsViewer")
 
-# Allow input zip file to be up to 100mb in size
-options(shiny.maxRequestSize = 100*1024^2)
-
+# Allow input zip file to be up to 200mb in size
+options(shiny.maxRequestSize = 200*1024^2)
+# MacOSX Compressed file messes up gtfsIO::import_gtfs() go though github it looks fixable
+#https://github.com/r-transit/gtfsio/blob/master/R/import_gtfs.R
 ##############################################################################
 # UI Side of App
 ##############################################################################
@@ -51,6 +52,7 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
                                       fileInput("selectFile", h4("Select GTFS Zip File:"),
                                                 multiple = FALSE,
                                                 accept = ".zip"),
+                                      helpText("No sub-folders allowed in Zip File"),
                                       uiOutput('routeOptions'),
                                       uiOutput('zoom2Stop')
                         )
