@@ -2,7 +2,7 @@ input[type="number"] {
   max-width: 80%;
 }
 
-div.outer {
+.outer {
   position: fixed;
   top: 41px;
   left: 0;
@@ -12,6 +12,16 @@ div.outer {
   padding: 0;
 }
 
+.outer2 {
+  position: fixed;
+  top: 41px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
+  padding: 0;  
+}
+
 /* Customize fonts */
 body, label, input, button, select { 
   font-family: 'Helvetica Neue', Helvetica;
@@ -19,6 +29,12 @@ body, label, input, button, select {
 }
 h1, h2, h3, h4 { font-weight: 400; }
 
+#routesInHexText{color: black;
+       font-size: 14px;
+       font-weight: bold;
+      }
+
+              
 #controls {
   /* Appearance */
   background-color: white;

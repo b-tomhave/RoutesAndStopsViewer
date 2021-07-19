@@ -14,10 +14,13 @@ library(gtfsFunctions) #devtools::install_github("b-tomhave/gtfsFunctions", forc
 library(gtfsio)
 library(leaflet)
 library(sf)
-#library(leaflet.extras)
+library(leaflet.extras) # For map reset button
 library(gtools) # For mixed sort
 library(DT)
 library(stringr) # For string formatting
+library(shinyjs) # For button disable/enable
+library(knitr) # For route density string output
+library(gtools)
 
 #setwd("~/Documents/R Projects/RoutesAndStopsViewer")
 
@@ -30,8 +33,7 @@ options(shiny.maxRequestSize = 200*1024^2)
 ##############################################################################
 ui <-navbarPage("Routes & Stops Viewer", id="nav",
            # Map Page
-           
-           tabPanel("Interactive map",
+           tabPanel("Explorer",
                     div(class="outer",
                         
                         tags$head(
@@ -46,13 +48,10 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
                         absolutePanel(id = "controls", class = "panel panel-default", fixed = TRUE,
                                       draggable = TRUE, top = 60, left = "auto", right = 20, bottom = "auto",
                                       width = 330, height = "auto",
-                                      
-                                      h2("Routes & Stops Viewer"),
-                                      helpText("Initial load time of 5-10 seconds."),
                                       fileInput("selectFile", h4("Select GTFS Zip File:"),
                                                 multiple = FALSE,
                                                 accept = ".zip"),
-                                      helpText("No sub-folders allowed in Zip File"),
+                                      helpText("Initial load time of 10-15 seconds. No sub-folders in Zip File"),
                                       uiOutput('routeOptions'),
                                       uiOutput('zoom2Stop')
                         )
@@ -61,8 +60,8 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
            # Header Preview Pge
            tabPanel("GTFS Overview",
                     h2("Overview of GTFS Files"),
-                    h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Interactive Map' tab to load data below."),
-                    tags$style(HTML("#gtfsFileLoadWarning{color: red;}")), # Set warning text to be red
+                    h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Explorer' tab to load data below."),
+                    tags$style(HTML("#gtfsFileLoadWarning{color: red; font-size: 10px;}")), # Set warning text to be red
                     fluidRow(
                         valueBoxOutput("staticBox_modes", width = 2),
                         valueBoxOutput("staticBox_stops", width = 2),
@@ -91,10 +90,42 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
                     DT::dataTableOutput("routesTable")
                     ),
            
+           
+           # Stop/Route Density Panel
+           tabPanel("Route Density",
+                    useShinyjs(),
+                    div(class="outer2",
+                        
+                        tags$head(
+                          # Include custom CSS
+                          includeCSS("styles.css")
+                        ),
+                    h3("Route Density Hex Map"),
+                    fluidRow(column(4,
+                                    "Hover over hexagon to show route alignments that serve that area."),
+                             column(2),
+                             column(6,
+                                    htmlOutput('routesInHexText'))),
+                    fluidRow(column(4,
+                                    h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Explorer' tab to load data."),
+                    )),
+                    fluidRow(column(3,
+                                    actionButton("loadRouteDensityMap", "Load Route Density Map")))
+                    ,
+
+                    leafletOutput("hexMap", width="100%", height="80%")
+                    # fluidRow(column(8,
+                    #                 leafletOutput("hexMap", width="100%", height="100%"))
+                    #         )
+                    
+              )
+           ),
+           
+           
            # Frequency Analysis Preview
-           tabPanel("Single Route Frequency Analysis",
+           tabPanel("Frequency Analysis",
                     h2("Overview of Route Level Frequency/Headway"),
-                    h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Interactive Map' tab to load data below."),
+                    h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Explorer' tab to load data below."),
                     fluidRow(
                       column(5,
                       uiOutput("frequencyAnalysisRoute"),
@@ -118,9 +149,9 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
                                tableOutput('renderedTodRefTable'))
                     )
            ),
-           tabPanel("Multiple Route Frequency Plot",
+           tabPanel("Frequency Rank",
                     h2("Overview of Route Level Frequency/Headway Across Multiple Routes"),
-                    h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Interactive Map' tab to load data below."),
+                    h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Explorer' tab to load data below."),
                     
                     fluidRow(uiOutput("multiRouteSelectionFreq"),
                              plotlyOutput("multiRouteFreqPlot"))
@@ -131,12 +162,15 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
 # Server Side of App
 ##############################################################################
 server <- function(input, output, session, ...) {
+  
     # Load Basic Map Background with default zoom at center of USA
     output$routemap <- renderLeaflet({
       leaflet()%>%
         #Add Basemap Options
         addProviderTiles(providers$CartoDB.Positron,
                          group   = "Sketch (Default)")%>%
+        addProviderTiles(providers$Stamen.Toner,
+                         group   = "Black & White")%>%
         addProviderTiles(providers$OpenStreetMap,
                          group   = "OpenStreetMap")%>%
         addProviderTiles(providers$Esri.WorldImagery,
@@ -146,12 +180,39 @@ server <- function(input, output, session, ...) {
                 zoom = 5)%>%
         # Layers control
         addLayersControl(
-          baseGroups = c("Sketch (Default)", "OpenStreetMap","Aerial"),
+          baseGroups = c("Sketch (Default)", "Black & White", "OpenStreetMap","Aerial"),
           options    = layersControlOptions(collapsed = FALSE),
           position = c("bottomright"))%>%
         addMeasure(position = c("bottomright")) #Add distance (and area measure)
       # addResetMapButton()%>%
     })
+    
+    
+    # Create Base Map for Route Density
+    output$hexMap <- renderLeaflet({
+      leaflet()%>%
+        #Add Basemap Options
+        addProviderTiles(providers$CartoDB.Positron,
+                         group   = "Sketch (Default)")%>%
+        addProviderTiles(providers$Stamen.Toner,
+                         group   = "Black & White")%>%
+        addProviderTiles(providers$OpenStreetMap,
+                         group   = "OpenStreetMap")%>%
+        addProviderTiles(providers$Esri.WorldImagery,
+                         group   = "Aerial")%>%
+        setView(lat = 39.809253334942575,
+                lng = -98.55663889876627,
+                zoom = 5)%>%
+        # Layers control
+        addLayersControl(
+          baseGroups = c("Sketch (Default)", "Black & White", "OpenStreetMap","Aerial"),
+          options    = layersControlOptions(collapsed = FALSE),
+          position = c("bottomleft"))%>%
+        addResetMapButton()%>%
+        addMeasure(position = c("topleft")) #Add distance (and area measure)
+    })
+    
+    
     ##############################################################################
     # Reactive Variables
     ##############################################################################
@@ -230,7 +291,7 @@ server <- function(input, output, session, ...) {
         x$routes <- x$routes%>%unique()
         x$trips  <- x$trips%>%unique()
         
-        incProgress(0.5, message = "GTFS Loaded") # Progress bar message
+        incProgress(0.3, message = "GTFS Loaded") # Progress bar message
         return(x)
     })
     
@@ -249,6 +310,16 @@ server <- function(input, output, session, ...) {
         return(keyfigures)
     })
     
+    # Get stops data and create routesAtStop field
+    stops<- reactive({
+      #stopTable <- gtfsFunctions::routeIDAtStops(gtfs_file())
+      stopTableSimple <- gtfsFunctions::simpleRoutesAtStops(gtfs_file())
+      #incProgress(0.4, message = "Stops Loaded") # Progress bar message
+      return (stopTableSimple)
+    })
+    
+    
+    
     # Get Route Line Geometry from Loaded GTFS File
     routeGeoms <- reactive({
         geoms <- gtfsFunctions::gtfs2RouteLines(gtfs_file()$routes, gtfs_file()$trips, gtfs_file()$shapes)
@@ -258,19 +329,15 @@ server <- function(input, output, session, ...) {
     # Get frequency data for all routes
     allFreqData <- reactive({
       completeFreqTable <- na.omit(gtfsFunctions::calculateFrequenciesByRoute(gtfs_file()))
-      incProgress(0.7, message = "Frequencies Calculated") # Progress bar message
       return(completeFreqTable)
     })
     
     
-    # Get stops data and create routesAtStop field
-    stops<- reactive({
-        #stopTable <- gtfsFunctions::routeIDAtStops(gtfs_file())
-        stopTableSimple <- gtfsFunctions::simpleRoutesAtStops(gtfs_file())
-        incProgress(0.9, message = "Stops Loaded") # Progress bar message
-        return (stopTableSimple)
+    # Get Hex Layer of Route Densities within GTFS Stops bbox
+    countPerHex <- reactive({
+        return(gtfsFunctions::uniqueRoutesInHexTessalation(gtfs_file(), hexSize = 0.02)) # Takes several seconds
     })
-    
+
     
     
     # Reformat above reactive stops object to have a single record for each stop-route pair
@@ -286,12 +353,24 @@ server <- function(input, output, session, ...) {
 
 
 ##############################################################################
-# GTFS Interactive Map Tab
+# GTFS Explorer Tab
 ##############################################################################
 # Set that no routes were previously picked with this gtfs file (used when exlcuding layers in map)
 previousRoutes <- c("") # Set basic empty list
-
+# Start With Hex Map Load Button Disabled Until GTFS Loaded
+shinyjs::disable("loadRouteDensityMap")
+    
 observeEvent(input$selectFile, {
+  shinyjs::disable("loadRouteDensityMap")
+  # Clear Hex Map Legend and Shapes If Present
+  leafletProxy("hexMap")%>%
+    clearControls()%>%
+    clearGroup("hoverRoutes")%>%
+    clearGroup("hexLayer")
+  
+  # Clear HexText
+  output$routesInHexText <- renderUI({HTML(paste("Routes w/ Stop in Hex Area: "))})
+  
   withProgress(message = 'Loading...', value = 0, {
 
     # Get Named List with name as formatted route and value as route_id (the opposite of routeIdAsFormatedRoute())
@@ -322,9 +401,16 @@ observeEvent(input$selectFile, {
       newOrder = mixedsort(routeChoicesFormatted)
     }
     
-    # Get the Frequency Data
+    # Load Reactive Vars
+    stops()
+    incProgress(0.1, message = "Generating Route Geoms") # Progress bar message
+    routeGeoms()
+    incProgress(0.25, message = "Generating Frequencies") # Progress bar message
     allFreqData()
     
+    # Enable Hex Map Loading Button
+    shinyjs::enable("loadRouteDensityMap")
+
     # Dropdown menu to select routes to view
       output$routeOptions <- renderUI({  
       pickerInput(
@@ -378,7 +464,16 @@ observeEvent(input$selectFile, {
              maxOptions = 1), # Only allow 1 selection but maintain formatting
           multiple = TRUE)
       })
-  
+      
+      # # Toggle to show/hide route density hex layer
+      # output$routeDensityToggle <- renderUI({  
+      #     prettySwitch("routeDensityToggleInput",
+      #                  "Show Route Density By Area",
+      #                  fill = T,
+      #                  value = F
+      #     )
+      # })
+      # 
       
       # Set that no routes were previously picked with this gtfs file (used when exlcuding layers in map)
       previousRoutes <<- c("") # Set basic empty list
@@ -406,6 +501,7 @@ observeEvent(input$selectFile, {
         groupOptions("AllStops", zoomLevels = 15:25) # Only show stops when zoomed in enough
     })
 })
+
 # Add Leaflet Lines
 observeEvent(input$routeOptionsInput, {
   # If some routes are selected then plot, if not, remove all shapes from map
@@ -494,6 +590,7 @@ observeEvent(input$zoom2StopInput,{
   }
 }, ignoreNULL = FALSE)
 
+
 ##############################################################################
 # GTFS Overview Tab
 ##############################################################################
@@ -544,18 +641,94 @@ observeEvent(input$gtfsFileSelect, {
   }, ignoreNULL = FALSE
 )
 
+##############################################################################
+# Route Density Tab
+##############################################################################
+# Add Route Density When Data Loaded
+observeEvent(input$loadRouteDensityMap, {
+  req(input$selectFile) # Make Sure data exists
+
+  # Load Hex Data
+  countPerHex()
+  #countPerHex <- gtfsFunctions::uniqueRoutesInHexTessalation(gtfs_file(), hexSize = 0.02)
+
+
+  colorVector <- c("grey75","#FFFFB2","#FD8D3C", "#BD0026")
+  hexPallete <- colorBin(
+    palette = colorVector
+    , domain = countPerHex()$uniqueRouteCount
+    , bins =  c(1, 3, 5, 7, max(max(countPerHex()$uniqueRouteCount),10))
+    , reverse = F
+  )
+    
+  leafletProxy("hexMap")%>%
+    clearControls()%>%
+    setView(lng = mean(st_coordinates(countPerHex())[,1]),
+            lat = mean(st_coordinates(countPerHex())[,2]),
+            zoom = 10)%>%
+        addMapPane("hexPolygons", zIndex = 430) %>%   # Set Selected Routes to Be Bottom Layer
+        addPolygons(data = countPerHex(),
+                    layerId = ~hex_id,
+                    group = "hexLayer",
+                    fillColor = ~hexPallete(uniqueRouteCount),
+                    color = "grey",
+                    fillOpacity = 0.4,
+                    weight = 1,
+                    smoothFactor = 0.2,
+                    options = pathOptions(pane = "hexPolygons"),
+                    label = ~paste("Count of Unique Routes Serving Area:", uniqueRouteCount),
+                    highlightOptions = highlightOptions(color = "Black", weight = 4,
+                                                        bringToFront = T))%>%
+      addLegend(
+        position = "bottomright",
+        na.label = "0 Routes",
+        colors = colorVector,
+        labels = c("1-2 Route", "3-4 Routes", "5-6 Routes","7+ Routes"), opacity = 1,
+        title = "# of Unique Routes with Stop In Area"
+      )
+})
+
+## track mouseover events
+observeEvent(input$hexMap_shape_mouseover, {
+  # Get Routes in Hex
+  hoverHexId <- input$hexMap_shape_mouseover$id
+  routesInHexVector <- countPerHex()[countPerHex()$hex_id == hoverHexId, ]$routes
+
+  
+  # Output Routes in Hex Text
+  output$routesInHexText <- renderUI({HTML(paste("Routes w/ Stop in Hex Area: ",
+                                              knitr::combine_words(gtools::mixedsort(as.character(unlist(routesInHexVector))))
+                                                )
+                                          )
+                                      })
+
+  hoverRoutes <- routeGeoms()[routeGeoms()$route_id %in% gtools::mixedsort(as.character(unlist(routesInHexVector))), ]
+
+  if (nrow(hoverRoutes) !=0){
+    leafletProxy("hexMap")%>%
+      clearGroup("hoverRoutes")%>%
+      addMapPane("hoverRoutes", zIndex = 410) %>%   # Set Selected Routes to Be Bottom Layer
+      addPolylines(data = hoverRoutes,
+                   group = "hoverRoutes",
+                   color = ~ as.character(route_color),
+                   weight = 8,
+                   opacity = 0.9,
+                   label = ~paste("Route:", as.character(routeIdAsFormatedRoute()[route_id])),
+                   options = pathOptions(pane = "hoverRoutes"))
+  }else{
+    leafletProxy("hexMap")%>%
+      clearGroup("hoverRoutes")
+  }
+})
+
+
 
 ##############################################################################
 # Frequency Analysis Overview Tab
 ##############################################################################
 # Takes 13 seconds
 observeEvent(input$frequencyRouteSelection, {
-  # as.data.table(allFreqData())[as.character(route_id) == as.character(input$frequencyRouteSelection),
-  #                              (period) := factor(get(period),
-  #                                                 levels = c("Early","AM Peak","Midday", "PM Peak","Evening", "Night", "Owl"))]
-  
 
-  
   freqData <- data.table(allFreqData())[as.character(route_id) == as.character(input$frequencyRouteSelection)]
 
   setorder(freqData, direction_id, period)
@@ -602,7 +775,7 @@ output$renderedTodRefTable <- renderTable({transposedTOD},
 ##############################################################################
 observeEvent(input$multiRouteSelectionFreqInput, {
 freqData <- data.table(allFreqData())[as.character(route_id) == as.character(input$multiRouteSelectionFreqInput) & avgHeadway_Mins < 9000 & direction_id == 0 & period == "AM Peak"]
-print(freqData)
+
 #midday2 <- midday[midday$avgHeadway_Mins < 9000 & midday$direction_id == 0 & midday$period == "AM Peak", ]
 #freqData$route_id <- factor(freqData$route_id , levels = unique(freqData$route_id)[order(as.numeric(freqData$avgHeadway_Mins))])
 #multiRouteSelectionFreq
