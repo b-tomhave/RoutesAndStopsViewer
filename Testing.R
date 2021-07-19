@@ -2,6 +2,8 @@ library(data.table)
 library(gtfsFunctions) #devtools::install_github("b-tomhave/gtfsFunctions")
 library(tidytransit)
 library(dplyr)
+
+
 {x <- gtfsFunctions::formatGTFSObject("/Users/bentomhave/Documents/Data_GTFS/PreCovid_Fall2019/MetroTransit_MSP_Oct2019.zip")
 #MetroTransit_MSP_5_2021
 #MetroTransit_MSP
