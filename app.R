@@ -103,7 +103,7 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
                     h3("Route Density Hex Map"),
                     fluidRow(column(4,
                                     "Hover over hexagon to show route alignments that serve that area."),
-                             column(2),
+                             column(1),
                              column(6,
                                     htmlOutput('routesInHexText'))),
                     fluidRow(column(4,
@@ -163,6 +163,8 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
 ##############################################################################
 server <- function(input, output, session, ...) {
   
+    # Load Reactive Values for route id to formatted route Id
+  dynamicValues <- reactiveValues(routeId2FormattedRouteNameList = NULL)
     # Load Basic Map Background with default zoom at center of USA
     output$routemap <- renderLeaflet({
       leaflet()%>%
@@ -347,7 +349,7 @@ server <- function(input, output, session, ...) {
     })
     
     # Create formatted list so that user sees route_short_name but shiny uses route_id
-    routeIdAsFormatedRoute<- reactive({
+    routeIdAsFormattedRoute<- reactive({
       return(gtfsFunctions::routeId2routeShortName(gtfs_file()$routes))
     })
 
@@ -361,6 +363,9 @@ previousRoutes <- c("") # Set basic empty list
 shinyjs::disable("loadRouteDensityMap")
     
 observeEvent(input$selectFile, {
+  # Reset Formatted Route ID List
+  dynamicValues$routeId2FormattedRouteNameList <- NULL
+  
   shinyjs::disable("loadRouteDensityMap")
   # Clear Hex Map Legend and Shapes If Present
   leafletProxy("hexMap")%>%
@@ -373,7 +378,7 @@ observeEvent(input$selectFile, {
   
   withProgress(message = 'Loading...', value = 0, {
 
-    # Get Named List with name as formatted route and value as route_id (the opposite of routeIdAsFormatedRoute())
+    # Get Named List with name as formatted route and value as route_id (the opposite of routeIdAsFormattedRoute())
     routeChoicesFormatted <- as.character(gtfs_file()$routes$route_id)
     names(routeChoicesFormatted) <- as.character(gtfs_file()$routes$formattedRouteName)#
 
@@ -400,6 +405,8 @@ observeEvent(input$selectFile, {
     }else{
       newOrder = mixedsort(routeChoicesFormatted)
     }
+    
+    dynamicValues$routeId2FormattedRouteNameList <- newOrder
     
     # Load Reactive Vars
     stops()
@@ -510,7 +517,7 @@ observeEvent(input$routeOptionsInput, {
     spatialData <- routeGeoms()[routeGeoms()$route_id %in% input$routeOptionsInput, ]
 
     # Get List of Stop Ids on Selected Route(s)
-    selectedStopIds <- unique(stopRouteTable_Long()[with(stopRouteTable_Long(), routesAtStop %in% routeIdAsFormatedRoute()[c(input$routeOptionsInput)]), stop_id])
+    selectedStopIds <- unique(stopRouteTable_Long()[with(stopRouteTable_Long(), routesAtStop %in% routeIdAsFormattedRoute()[c(input$routeOptionsInput)]), stop_id])
     
     # Filter Stops data to only include those selected stops
     stopsData <- stops()[stop_id %in% selectedStopIds,]
@@ -531,7 +538,7 @@ observeEvent(input$routeOptionsInput, {
                      group = ~as.character(route_id),
                      color = ~ as.character(route_color),
                      weight = 8,
-                     label = ~paste("Route:", as.character(routeIdAsFormatedRoute()[route_id])),
+                     label = ~paste("Route:", as.character(routeIdAsFormattedRoute()[route_id])),
                      options = pathOptions(pane = "SelectedRoutes"))%>%
         addCircleMarkers(data = stopsData,
                          group = ~paste0("SelectedStops"),
@@ -694,15 +701,27 @@ observeEvent(input$hexMap_shape_mouseover, {
   hoverHexId <- input$hexMap_shape_mouseover$id
   routesInHexVector <- countPerHex()[countPerHex()$hex_id == hoverHexId, ]$routes
 
+  # routeIdAsFormattedRoute()
+  # testFormat <- c(124,52,7,68,5)
+  # names(testFormat) <-c('n1','n2','n3','n4','n5')
+  # 
+  # as.character(testFormat[c('n1','n5')])
+  # 
+  hoverRouteIds <- gtools::mixedsort(as.character(unlist(routesInHexVector)))
+  
+  # Have to Reverse order of initial list to be able to call based on routeIDs to get name
+  routeId2FormattedString <- setNames(names(dynamicValues$routeId2FormattedRouteNameList), dynamicValues$routeId2FormattedRouteNameList)
+  
+  hoverFormattedRouteIds <- gtools::mixedsort(as.character(routeId2FormattedString[as.character(hoverRouteIds)]))
   
   # Output Routes in Hex Text
   output$routesInHexText <- renderUI({HTML(paste("Routes w/ Stop in Hex Area: ",
-                                              knitr::combine_words(gtools::mixedsort(as.character(unlist(routesInHexVector))))
+                                              knitr::combine_words(hoverFormattedRouteIds)
                                                 )
                                           )
                                       })
 
-  hoverRoutes <- routeGeoms()[routeGeoms()$route_id %in% gtools::mixedsort(as.character(unlist(routesInHexVector))), ]
+  hoverRoutes <- routeGeoms()[routeGeoms()$route_id %in% hoverRouteIds, ]
 
   if (nrow(hoverRoutes) !=0){
     leafletProxy("hexMap")%>%
@@ -713,7 +732,7 @@ observeEvent(input$hexMap_shape_mouseover, {
                    color = ~ as.character(route_color),
                    weight = 8,
                    opacity = 0.9,
-                   label = ~paste("Route:", as.character(routeIdAsFormatedRoute()[route_id])),
+                   label = ~paste("Route:", as.character(routeIdAsFormattedRoute()[route_id])),
                    options = pathOptions(pane = "hoverRoutes"))
   }else{
     leafletProxy("hexMap")%>%
