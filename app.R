@@ -2,7 +2,7 @@
 ##############################################################################
 # Libraries
 library(shiny)
-library(shinyjs) #For javascript collapse box button
+library(shinyjs) #For javascript collapse box button and hide unhide
 library(shinydashboard)
 library(shinydashboardPlus)
 library(shinythemes)
@@ -110,13 +110,10 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
                                     h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Explorer' tab to load data."),
                     )),
                     fluidRow(column(3,
-                                    actionButton("loadRouteDensityMap", "Load Route Density Map")))
-                    ,
+                                    actionButton("loadRouteDensityMap", "Load Route Density Map"))),
 
                     leafletOutput("hexMap", width="100%", height="80%")
-                    # fluidRow(column(8,
-                    #                 leafletOutput("hexMap", width="100%", height="100%"))
-                    #         )
+
                     
               )
            ),
@@ -124,11 +121,14 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
            
            # Frequency Analysis Preview
            tabPanel("Frequency Analysis",
+                    shinyjs::useShinyjs(), # Allow show/hide buttons
                     h2("Overview of Route Level Frequency/Headway"),
                     h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Explorer' tab to load data below."),
+                    fluidRow(column(3,
+                                    actionButton("loadFreqData", "Load Frequency Data"))),
                     fluidRow(
                       column(5,
-                      uiOutput("frequencyAnalysisRoute"),
+                      shinyjs::hidden(uiOutput("frequencyAnalysisRoute")),
                       "Frequencies obtained by calculating time between same route & direction service at stop_sequence = 1",
                       br(),
                       br()
@@ -136,11 +136,11 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
                     ),
                     # fluidRow(br()),
                     fluidRow(
-                        column(3,
-                             DT::dataTableOutput("frequencyTable")  
-                        ),
-                        column(2),
-                        column(7, align = "center",
+                        # column(3,
+                        #      DT::dataTableOutput("frequencyTable")  
+                        # ),
+                        # column(2),
+                        column(12, align = "center",
                                plotlyOutput("freqScatterPlot"),
                                br(),
                                br(),
@@ -148,23 +148,26 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
                                br(),
                                tableOutput('renderedTodRefTable'))
                     )
-           ),
-           tabPanel("Frequency Rank",
-                    h2("Overview of Route Level Frequency/Headway Across Multiple Routes"),
-                    h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Explorer' tab to load data below."),
-                    
-                    fluidRow(uiOutput("multiRouteSelectionFreq"),
-                             plotlyOutput("multiRouteFreqPlot"))
-           )
+           )#,
+           # tabPanel("Frequency Rank",
+           #          h2("Overview of Route Level Frequency/Headway Across Multiple Routes"),
+           #          h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Explorer' tab to load data below."),
+           #          
+           #          fluidRow(uiOutput("multiRouteSelectionFreq"),
+           #                   plotlyOutput("multiRouteFreqPlot"))
+           # )
 )
 
 ##############################################################################
 # Server Side of App
 ##############################################################################
 server <- function(input, output, session, ...) {
+  # Initial Button State
+  shinyjs::disable("loadFreqData")
   
   # Load Reactive Values for route id to formatted route Id
-  dynamicValues <- reactiveValues(routeId2FormattedRouteNameList = NULL)
+  dynamicValues <- reactiveValues(routeId2FormattedRouteNameList = NULL,
+                                  allFreqData = NULL)
     # Load Basic Map Background with default zoom at center of USA
     output$routemap <- renderLeaflet({
       leaflet()%>%
@@ -293,7 +296,7 @@ server <- function(input, output, session, ...) {
         x$routes <- x$routes%>%unique()
         x$trips  <- x$trips%>%unique()
         
-        incProgress(0.3, message = "GTFS Loaded") # Progress bar message
+        incProgress(0.5, message = "GTFS Loaded") # Progress bar message
         return(x)
     })
     
@@ -329,10 +332,10 @@ server <- function(input, output, session, ...) {
     })
     
     # Get frequency data for all routes
-    allFreqData <- reactive({
-      completeFreqTable <- na.omit(gtfsFunctions::calculateFrequenciesByRoute(gtfs_file()))
-      return(completeFreqTable)
-    })
+    # allFreqData <- reactive({
+    #   completeFreqTable <- na.omit(gtfsFunctions::calculateFrequenciesByRoute(gtfs_file()))
+    #   return(completeFreqTable)
+    # })
     
     
     # Get Hex Layer of Route Densities within GTFS Stops bbox
@@ -363,6 +366,14 @@ previousRoutes <- c("") # Set basic empty list
 shinyjs::disable("loadRouteDensityMap")
     
 observeEvent(input$selectFile, {
+  
+  # When New File Is Uploaded Erase Frequency and Hex Data
+  shinyjs::hide("frequencyAnalysisRoute")
+  dynamicValues$allFreqData <- NULL
+  
+  # Enable Buttons
+  shinyjs::enable("loadFreqData")
+  
   # Reset Formatted Route ID List
   dynamicValues$routeId2FormattedRouteNameList <- NULL
   
@@ -372,6 +383,11 @@ observeEvent(input$selectFile, {
     clearControls()%>%
     clearGroup("hoverRoutes")%>%
     clearGroup("hexLayer")
+  
+  leafletProxy("routemap")%>%
+    clearGroup("AllStops")%>%
+    clearGroup("SelectedStops")%>%
+    clearGroup("SelectedRoutes")
   
   # Clear HexText
   output$routesInHexText <- renderUI({HTML(paste("Routes w/ Stop in Hex Area: "))})
@@ -410,10 +426,8 @@ observeEvent(input$selectFile, {
     
     # Load Reactive Vars
     stops()
-    incProgress(0.1, message = "Generating Route Geoms") # Progress bar message
+    incProgress(0.2, message = "Generating Route Geoms") # Progress bar message
     routeGeoms()
-    incProgress(0.25, message = "Generating Frequencies") # Progress bar message
-    allFreqData()
     
     # Enable Hex Map Loading Button
     shinyjs::enable("loadRouteDensityMap")
@@ -492,7 +506,7 @@ observeEvent(input$selectFile, {
                   lat2 = max(as.numeric(stops()[,stop_lat])))%>%
         addMapPane("AllStops", zIndex = 420) %>% # Select map order to be below selected stops but above route liness
         addCircleMarkers(data = stops(),
-                         group = ~paste0("AllStops"),
+                         group = "AllStops",
                          lat = ~stop_lat,
                          lng = ~stop_lon,
                          radius= 4,
@@ -505,7 +519,7 @@ observeEvent(input$selectFile, {
                                         paste("<b>Routes Serving Stop:</b>", routesAtStop, sep = '<br/>')
                          ),
                          options = pathOptions(pane = "AllStops"))%>%
-        groupOptions("AllStops", zoomLevels = 15:25) # Only show stops when zoomed in enough
+        groupOptions("AllStops", zoomLevels = 13:25) # Only show stops when zoomed in enough
     })
 })
 
@@ -541,7 +555,7 @@ observeEvent(input$routeOptionsInput, {
                      label = ~paste("Route:", as.character(routeIdAsFormattedRoute()[route_id])),
                      options = pathOptions(pane = "SelectedRoutes"))%>%
         addCircleMarkers(data = stopsData,
-                         group = ~paste0("SelectedStops"),
+                         group = "SelectedStops",
                          lat = ~stop_lat,
                          lng = ~stop_lon,
                          radius= 6,
@@ -556,7 +570,7 @@ observeEvent(input$routeOptionsInput, {
                                         paste("<b>Routes Serving Stop:</b>", routesAtStop, sep = '<br/>')
                          ),
                          options = pathOptions(pane = "SelectedStops"))%>%
-        groupOptions(paste0("Stops_", as.character(stopsData$stop_id)), zoomLevels = 12:25)#%>% # Only show stops when zoomed in enough     
+        groupOptions("SelectedStops", zoomLevels = 12:25)#%>% # Only show stops when zoomed in enough     
       previousRoutes <<- input$routeOptionsInput
 
   }else{
@@ -654,9 +668,10 @@ observeEvent(input$gtfsFileSelect, {
 # Add Route Density When Data Loaded
 observeEvent(input$loadRouteDensityMap, {
   req(input$selectFile) # Make Sure data exists
-
+  withProgress(message = 'Loading Hex Map...', value = 0.33, {
   # Load Hex Data
   countPerHex()
+  })
   #countPerHex <- gtfsFunctions::uniqueRoutesInHexTessalation(gtfs_file(), hexSize = 0.02)
 
 
@@ -745,19 +760,29 @@ observeEvent(input$hexMap_shape_mouseover, {
 ##############################################################################
 # Frequency Analysis Overview Tab
 ##############################################################################
+observeEvent(input$loadFreqData,{
+  req(input$selectFile) # Make Sure data exists
+  withProgress(message = 'Calculating Frequencies...', value = 0.33, {
+  dynamicValues$allFreqData <- na.omit(gtfsFunctions::calculateFrequenciesByRoute(gtfs_file()))
+  shinyjs::show("frequencyAnalysisRoute")
+  })
+})
+
 # Takes 13 seconds
 observeEvent(input$frequencyRouteSelection, {
+  req(input$selectFile)
 
-  freqData <- data.table(allFreqData())[as.character(route_id) == as.character(input$frequencyRouteSelection)]
+  freqData <- data.table(dynamicValues$allFreqData)[as.character(route_id) == as.character(input$frequencyRouteSelection)]
 
   setorder(freqData, direction_id, period)
-  output$frequencyTable <- DT::renderDataTable(DT::datatable(freqData,
-                                                           options = list(pageLength = 15),
-                                                           rownames= FALSE
-                                                           ))
+  # output$frequencyTable <- DT::renderDataTable(DT::datatable(freqData,
+  #                                                          options = list(pageLength = 15),
+  #                                                          rownames= FALSE
+  #                                                          ))
   
   output$freqScatterPlot <- renderPlotly({plot_ly(freqData, x = ~period, y = ~avgHeadway_Mins,
-                                    type = 'scatter', mode = 'lines+markers', linetype = ~direction_id) %>%
+                                    type = 'scatter', mode = 'lines+markers', linetype = ~direction_id,
+                                    name = ~paste("Direction:", direction_id)) %>%
                                     layout(title = sprintf('Route %s Avg. Headway By Time of Day & Route Direction', input$frequencyRouteSelection),
                                            xaxis = list(title = 'Time of Day'),
                                            yaxis = list (title = 'Avg. Headway (Minutes)'))%>%
@@ -792,34 +817,37 @@ output$renderedTodRefTable <- renderTable({transposedTOD},
 ##############################################################################
 # Multi-Route Frequency Analysis Plot
 ##############################################################################
-observeEvent(input$multiRouteSelectionFreqInput, {
-freqData <- data.table(allFreqData())[as.character(route_id) == as.character(input$multiRouteSelectionFreqInput) & avgHeadway_Mins < 9000 & direction_id == 0 & period == "AM Peak"]
+# observeEvent(input$multiRouteSelectionFreqInput, {
+# freqData <- data.table(dynamicValues$allFreqData)[as.character(route_id) == as.character(input$multiRouteSelectionFreqInput) & avgHeadway_Mins < 9000 & direction_id == 0 & period == "AM Peak"]
+# 
+# #midday2 <- midday[midday$avgHeadway_Mins < 9000 & midday$direction_id == 0 & midday$period == "AM Peak", ]
+# #freqData$route_id <- factor(freqData$route_id , levels = unique(freqData$route_id)[order(as.numeric(freqData$avgHeadway_Mins))])
+# #multiRouteSelectionFreq
+# # # Color code by route type?
+# # fig2 <- plot_ly(freqData,
+# #                 x = ~route_id,
+# #                 y = ~avgHeadway_Mins,
+# #                 type = "bar"
+# # )
+# # 
+# # 
+# # 
+# output$multiRouteFreqPlot <- renderPlotly({plot_ly(freqData,
+#                                                       x = ~route_id,
+#                                                       y = ~avgHeadway_Mins,
+#                                                       type = "bar"
+#                                                       ) %>%
+#     layout(title = sprintf('Route %s Avg. Headway By Time of Day & Route Direction', input$frequencyRouteSelection),
+#            xaxis = list(title = 'Time of Day'),
+#            yaxis = list (title = 'Avg. Headway (Minutes)'))%>%
+#     config(modeBarButtonsToRemove = c("zoom2d", "pan2d", "select2d", "lasso2d", "zoomIn2d",
+#                                       "zoomOut2d", "autoScale2d", "resetScale2d", "resetScale2d",
+#                                       "toggleSpikelines", "hoverClosestCartesian", "hoverCompareCartesian"))
+# })
+# })
 
-#midday2 <- midday[midday$avgHeadway_Mins < 9000 & midday$direction_id == 0 & midday$period == "AM Peak", ]
-#freqData$route_id <- factor(freqData$route_id , levels = unique(freqData$route_id)[order(as.numeric(freqData$avgHeadway_Mins))])
-#multiRouteSelectionFreq
-# # Color code by route type?
-# fig2 <- plot_ly(freqData,
-#                 x = ~route_id,
-#                 y = ~avgHeadway_Mins,
-#                 type = "bar"
-# )
-# 
-# 
-# 
-output$multiRouteFreqPlot <- renderPlotly({plot_ly(freqData,
-                                                      x = ~route_id,
-                                                      y = ~avgHeadway_Mins,
-                                                      type = "bar"
-                                                      ) %>%
-    layout(title = sprintf('Route %s Avg. Headway By Time of Day & Route Direction', input$frequencyRouteSelection),
-           xaxis = list(title = 'Time of Day'),
-           yaxis = list (title = 'Avg. Headway (Minutes)'))%>%
-    config(modeBarButtonsToRemove = c("zoom2d", "pan2d", "select2d", "lasso2d", "zoomIn2d",
-                                      "zoomOut2d", "autoScale2d", "resetScale2d", "resetScale2d",
-                                      "toggleSpikelines", "hoverClosestCartesian", "hoverCompareCartesian"))
-})
-})
+
+
 } # End of Server
 
 ##############################################################################
