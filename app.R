@@ -163,7 +163,7 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
 ##############################################################################
 server <- function(input, output, session, ...) {
   
-    # Load Reactive Values for route id to formatted route Id
+  # Load Reactive Values for route id to formatted route Id
   dynamicValues <- reactiveValues(routeId2FormattedRouteNameList = NULL)
     # Load Basic Map Background with default zoom at center of USA
     output$routemap <- renderLeaflet({
