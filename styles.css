@@ -22,6 +22,15 @@ input[type="number"] {
   padding: 0;  
 }
 
+#loading-spinner {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: -1;
+  margin-top: -33px;  /* half of the spinner's height */
+  margin-left: -33px; /* half of the spinner's width */
+}
+
 /* Customize fonts */
 body, label, input, button, select { 
   font-family: 'Helvetica Neue', Helvetica;
@@ -38,10 +47,10 @@ h1, h2, h3, h4 { font-weight: 400; }
 #controls {
   /* Appearance */
   background-color: white;
-  padding: 0 20px 20px 20px;
+  padding: 5px 5px 5px 5px;
   cursor: move;
   /* Fade out while not hovering */
-  opacity: 0.85;
+  opacity: 0.80;
   zoom: 0.9;
   transition: opacity 500ms 1s;
 }
@@ -59,15 +68,30 @@ h1, h2, h3, h4 { font-weight: 400; }
   font-size: 12px;
 }
 
+/* Format Text Warning that GTFS Must Be Loaded */
+#gtfsFileLoadWarning{
+  color: red; 
+  font-size: 10px;
+  
+}
+
+
+.zoom2StopClass .bs-select-all  {
+  display: none;
+}
+
+/* Decrease Width of dropdown-menu (For zoom to stopDropdown*/
+ul.dropdown-menu > li {
+    max-width: 300px;
+}
+
 /* If not using map tiles, show a white background */
 .leaflet-container {
   background-color: white !important;
 }
 
 /* Remove select-all option from route picker */
-.bs-select-all {
-  display: none;
-}
+
 
 /* Increase width of deselect-all option from route picker */
 .bs-deselect-all {

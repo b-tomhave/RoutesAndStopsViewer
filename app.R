@@ -1,4 +1,4 @@
-# R Shiny App GTFS Data Viewing
+# R Shiny App GTFS Data Viewing (Non-Modular: DON'T USE THIS ONE)
 ##############################################################################
 # Libraries
 library(shiny)
@@ -40,7 +40,7 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
                           # Include custom CSS
                           includeCSS("styles.css")
                         ),
-                        
+
                         # If not using custom CSS, set height of leafletOutput to a number instead of percent
                         leafletOutput("routemap", width="100%", height="100%"),
                         
@@ -55,9 +55,11 @@ ui <-navbarPage("Routes & Stops Viewer", id="nav",
                                       uiOutput('routeOptions'),
                                       uiOutput('zoom2Stop')
                         )
+                        
+
                     )
            ),
-           # Header Preview Pge
+           # Header Preview Page
            tabPanel("GTFS Overview",
                     h2("Overview of GTFS Files"),
                     h5(id= "gtfsFileLoadWarning", "GTFS Zip File Must Be Loaded on 'Explorer' tab to load data below."),
@@ -844,7 +846,7 @@ output$renderedTodRefTable <- renderTable({transposedTOD},
 #                                       "zoomOut2d", "autoScale2d", "resetScale2d", "resetScale2d",
 #                                       "toggleSpikelines", "hoverClosestCartesian", "hoverCompareCartesian"))
 # })
-# })
+# })==
 
 
 
@@ -859,7 +861,7 @@ shinyApp(ui, server)
 # library(gtfsFunctions) #devtools::install_github("b-tomhave/gtfsFunctions")
 # library(tidytransit)
 # library(dplyr)
-# #
+
 # # # Takes 5 seconds to load gtfs data
 # data <- tidytransit::read_gtfs("/Users/bentomhave/Documents/Data_GTFS/MetroTransit_MSP.zip",
 #                             files = c('agency', 'stops', 'routes', 'trips',
