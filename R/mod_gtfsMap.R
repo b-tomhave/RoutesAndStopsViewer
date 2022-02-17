@@ -166,12 +166,12 @@ mod_gtfsMap_server <- function(id, rvals){
 
 
 # Main application
-library(shiny)
-library(leaflet)
-library(shinyWidgets) # For Pickerinput
-library(gtfsFunctions) #devtools::install_github("b-tomhave/gtfsFunctions", force = TRUE)
-library(gtools) # For mixedsort
-library(data.table) # For setcolorder
+# library(shiny)
+# library(leaflet)
+# library(shinyWidgets) # For Pickerinput
+# library(gtfsFunctions) #devtools::install_github("b-tomhave/gtfsFunctions", force = TRUE)
+# library(gtools) # For mixedsort
+# library(data.table) # For setcolorder
 
 # Allow input zip file to be up to 200mb in size
 options(shiny.maxRequestSize = 200*1024^2)

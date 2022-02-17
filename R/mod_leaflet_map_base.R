@@ -13,7 +13,7 @@ mod_leaflet_map_base_server <- function(id){
   ns <- session$ns
   # w <- Waiter$new()#, html="Please wait")#, hide_on_render=T)
   
-  output$ns <- renderLeaflet(quoted = TRUE, {
+  output$ns <- renderLeaflet(quoted = F, {
     # w$show()
     # waiter_show()
     leaflet() %>%
